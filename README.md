@@ -17,8 +17,8 @@ See the following ascii diagram for the architecture.
                                          |
                                          v
                          +--------------------------------+
-                         |   /dev/ttyUSBX (JOYTICK_PORT)  |
-                         |   [async serial reader]        |
+                         |  /dev/ttyUSBX (JOYSTICK_PORT)  |
+                         |  [async serial reader]         |
                          +--------------------------------+
                                          |
                                          v
@@ -33,10 +33,10 @@ See the following ascii diagram for the architecture.
                           |   +-----------------------+  |
                           |   |     HTTP API (Flask)  |  |
                           |   |-----------------------|  |
-                          |   | POST /set_target      |  |
-                          |   | GET  /status          |  |
-                          |   | POST /goto_preset     |  |
-                          |   | POST /save_preset     |  |
+                          |   | POST /target/set      |  |
+                          |   | GET  /target/get      |  |
+                          |   | POST /preset/goto     |  |
+                          |   | POST /preset/save     |  |
                           |   +-----------------------+  |
                           +------------------------------+
                                          |
@@ -49,7 +49,7 @@ See the following ascii diagram for the architecture.
       +-----------------------------+         +-----------------------------+
                     |                                          |
                     v                                          v
-         +----------------------+                    +----------------------+
-         |   PTZ Camera 1       |                    |   PTZ Camera 2       |
-         +----------------------+                    +----------------------+
+            +------------------+                     +------------------+
+            |   PTZ Camera 1   |                     |   PTZ Camera 2   |
+            +------------------+                     +------------------+
 
