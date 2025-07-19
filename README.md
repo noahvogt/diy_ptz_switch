@@ -30,26 +30,27 @@ See the following ascii diagram for the architecture.
                           | - Forward to selected cam    |
                           | - Handle HTTP API requests   |
                           |                              |
-                          |   +-----------------------+  |
-                          |   |     HTTP API (Flask)  |  |
-                          |   |-----------------------|  |
-                          |   | POST /target/set      |  |
-                          |   | GET  /target/get      |  |
-                          |   | POST /preset/goto     |  |
-                          |   | POST /preset/save     |  |
-                          |   +-----------------------+  |
+                          |   +----------------------+   |
+                          |   |     HTTP API         |   |
+                          |   |----------------------|   |
+                          |   | POST /target/set     |   |
+                          |   | GET  /target/get     |   |
+                          |   | POST /preset/goto    |   |
+                          |   | POST /preset/save    |   |
+                          |   +----------------------+   |
                           +------------------------------+
                                          |
-                    +--------------------+---------------------+
-                    |                                          |
-                    v                                          v
-      +-----------------------------+         +-----------------------------+
-      |  /dev/ttyUSBY (CAM1_PORT)   |         |  /dev/ttyUSBZ (CAM2_PORT)   |
-      |  [async serial writer]      |         |  [async serial writer]      |
-      +-----------------------------+         +-----------------------------+
-                    |                                          |
-                    v                                          v
-            +------------------+                     +------------------+
-            |   PTZ Camera 1   |                     |   PTZ Camera 2   |
-            +------------------+                     +------------------+
+                    +--------------------+------------------+
+                    |                                       |
+                    v                                       v
+      +----------------------------+         +----------------------------+
+      |  /dev/ttyUSBY (CAM1_PORT)  |         |  /dev/ttyUSBZ (CAM2_PORT)  |
+      |  [async serial writer]     |         |  [async serial writer]     |
+      +----------------------------+         +----------------------------+
+                    |                                        |
+                    v                                        v
+        +------------------------+              +------------------------+
+        |  PTZ Camera 1          |              |   PTZ Camera 2         |
+        |  (Pelco-D via RS-485)  |              |  (Pelco-D via RS-485)  |
+        +------------------------+              +------------------------+
 
