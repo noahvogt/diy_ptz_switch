@@ -1,7 +1,8 @@
 import asyncio
+import os
+
 import serial_asyncio
 from serial.tools import list_ports
-import os
 import yaml
 from aiohttp import web
 
