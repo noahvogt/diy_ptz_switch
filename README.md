@@ -37,6 +37,8 @@ See the following ascii diagram for the architecture.
                           |   | GET  /target/get     |   |
                           |   | POST /preset/goto    |   |
                           |   | POST /preset/save    |   |
+                          |   | GET  /mode/get       |   |
+                          |   | POST /mode/set       |   |
                           |   +----------------------+   |
                           +------------------------------+
                                          |

@@ -17,7 +17,7 @@ def load_location_roles():
     config_file = get_config_path()
     if not os.path.exists(config_file):
         raise FileNotFoundError(f"Config file not found at: {config_file}")
-    with open(config_file, "r") as f:
+    with open(config_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     return config.get("location_roles", {})
 
@@ -47,6 +47,7 @@ BAUDRATE = 2400
 # Globals
 # =========================
 current_target = "cam1"  # Default
+current_mode = "preview"  # Default
 cam_transports = {}
 
 # =========================
@@ -153,12 +154,26 @@ async def handle_save_preset(request):
 
     return web.json_response({"status": "ok", "action": "save", "preset": preset_id, "target": target})
 
+async def handle_set_mode(request):
+    global current_mode
+    mode = request.query.get("mode")
+    if mode not in ("preview", "program"):
+        return web.json_response({"error": "Invalid mode"}, status=400)
+    current_mode = mode
+    return web.json_response({"status": "ok", "mode": current_mode})
+
+async def handle_get_mode(request):
+    return web.json_response({"mode": current_mode})
+
+
 def start_http_server():
     app = web.Application()
     app.router.add_get("/target/get", handle_status)
     app.router.add_post("/target/set", handle_set_target)
     app.router.add_post("/preset/goto", handle_goto_preset)
     app.router.add_post("/preset/save", handle_save_preset)
+    app.router.add_get("/mode/get", handle_get_mode)
+    app.router.add_post("/mode/set", handle_set_mode)
     return web._run_app(app, port=1423)
 
 # =========================
