@@ -1,17 +1,28 @@
 import asyncio
 import os
+import argparse
 
 import serial_asyncio
 from serial.tools import list_ports
 import yaml
 from aiohttp import web
 
-# =========================
-# Config loading via XDG
-# =========================
+
 def get_config_path():
-    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+    parser = argparse.ArgumentParser(description="PTZ router")
+    parser.add_argument(
+        "-c", "--config", type=str, help="Path to config.yml file"
+    )
+    args = parser.parse_args()
+
+    if args.config:
+        return args.config
+
+    xdg_config_home = os.environ.get(
+        "XDG_CONFIG_HOME", os.path.expanduser("~/.config")
+    )
     return os.path.join(xdg_config_home, "diy_ptz_switch", "config.yml")
+
 
 def load_location_roles():
     config_file = get_config_path()
@@ -21,11 +32,9 @@ def load_location_roles():
         config = yaml.safe_load(f)
     return config.get("location_roles", {})
 
+
 location_roles = load_location_roles()
 
-# =========================
-# Serial Port Mapping
-# =========================
 port_map = {}
 for port in list_ports.comports():
     if "LOCATION=" in port.hwid:
@@ -43,16 +52,11 @@ CAM1_PORT = port_map.get("cam1")
 CAM2_PORT = port_map.get("cam2")
 BAUDRATE = 2400
 
-# =========================
-# Globals
-# =========================
 current_target = "cam1"  # Default
 current_mode = "preview"  # Default
 cam_transports = {}
 
-# =========================
-# Pelco-D Packet Forwarding
-# =========================
+
 class JoystickProtocol(asyncio.Protocol):
     def __init__(self, forward_func):
         self.forward = forward_func
@@ -87,13 +91,12 @@ class JoystickProtocol(asyncio.Protocol):
 
             self.forward(packet)
 
+
 class DummyCamProtocol(asyncio.Protocol):
     def connection_made(self, transport):
         pass
 
-# =========================
-# Pelco-D Preset Helpers
-# =========================
+
 def make_preset_command(cam_address: int, cmd2: int, preset_id: int):
     if not (1 <= preset_id <= 0xFF):
         raise ValueError("Preset ID must be between 1 and 255")
@@ -106,39 +109,56 @@ def make_preset_command(cam_address: int, cmd2: int, preset_id: int):
     packet.append(checksum)
     return packet
 
+
 def send_preset_command(cam_name, cmd2, preset_id):
     transport = cam_transports.get(cam_name)
     if not transport:
         print(f"[WARN] No transport for {cam_name}")
         return
-    packet = make_preset_command(1, cmd2, preset_id)  # Camera address is hardcoded as 1
-    print(f"[API] Sending preset cmd2={cmd2:02X} preset_id={preset_id} to {cam_name}")
+    packet = make_preset_command(
+        1, cmd2, preset_id
+    )  # Camera address is hardcoded as 1
+    print(
+        f"[API] Sending preset cmd2={cmd2:02X} preset_id={preset_id} to {cam_name}"
+    )
     transport.write(packet)
 
-# =========================
-# HTTP Server (aiohttp)
-# =========================
+
 async def handle_status(request):
     return web.json_response({"current_target": current_target})
+
 
 async def handle_set_target(request):
     global current_target
     data = await request.json()
     target = data.get("target")
     if target not in cam_transports:
-        return web.json_response({"error": f"Invalid target: {target}"}, status=400)
+        return web.json_response(
+            {"error": f"Invalid target: {target}"}, status=400
+        )
     current_target = target
     print(f"[API] Target set to: {current_target}")
     return web.json_response({"status": "ok", "target": current_target})
+
 
 async def handle_goto_preset(request):
     data = await request.json()
     preset_id = int(data.get("preset"))
     target = data.get("target", current_target)
     if target not in cam_transports:
-        return web.json_response({"error": f"Invalid target: {target}"}, status=400)
+        return web.json_response(
+            {"error": f"Invalid target: {target}"}, status=400
+        )
     send_preset_command(target, cmd2=0x07, preset_id=preset_id)
-    return web.json_response({"status": "ok", "action": "goto", "preset": preset_id, "target": target})
+    return web.json_response(
+        {
+            "status": "ok",
+            "action": "goto",
+            "preset": preset_id,
+            "target": target,
+        }
+    )
+
 
 async def handle_save_preset(request):
     data = await request.json()
@@ -150,9 +170,19 @@ async def handle_save_preset(request):
     elif target in cam_transports:
         send_preset_command(target, cmd2=0x03, preset_id=preset_id)
     else:
-        return web.json_response({"error": f"Invalid target: {target}"}, status=400)
+        return web.json_response(
+            {"error": f"Invalid target: {target}"}, status=400
+        )
 
-    return web.json_response({"status": "ok", "action": "save", "preset": preset_id, "target": target})
+    return web.json_response(
+        {
+            "status": "ok",
+            "action": "save",
+            "preset": preset_id,
+            "target": target,
+        }
+    )
+
 
 async def handle_set_mode(request):
     global current_mode
@@ -161,6 +191,7 @@ async def handle_set_mode(request):
         return web.json_response({"error": "Invalid mode"}, status=400)
     current_mode = mode
     return web.json_response({"status": "ok", "mode": current_mode})
+
 
 async def handle_get_mode(request):
     return web.json_response({"mode": current_mode})
@@ -176,9 +207,7 @@ def start_http_server():
     app.router.add_post("/mode/set", handle_set_mode)
     return web._run_app(app, port=1423)
 
-# =========================
-# Main
-# =========================
+
 async def main():
     global cam_transports
 
@@ -214,6 +243,6 @@ async def main():
     # Wait forever
     await asyncio.Event().wait()
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-
