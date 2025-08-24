@@ -2,9 +2,9 @@
 
 For a typical livestream production environment consisting of 2 ptz cameras and one joystick / controller board, most commercial options like the [Skaarhoj PTZ Fly](https://shop.skaarhoj.com/products/ptz-fly-w-blue-pill-inside) are
 - expensive
-- offer no API
+- offering no API
 - nearly impossible to automate
-- offer no rs485 serial connection support (basically only IP via RJ45)
+- offering no rs485 serial connection support (basically only IP via RJ45)
 
 To fix this, I thought why not connect the ptz cameras via their rs485 to a rs485 <-> usb serial converter to a computer and use a server that selects which ptz camera is sent the current joystick input. It also has a http api that allows seleting the current camera target and ptz commands like save_preset or goto_preset.
 

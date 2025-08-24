@@ -6,6 +6,28 @@ import serial_asyncio
 from serial.tools import list_ports
 import yaml
 from aiohttp import web
+from asyncio import Queue
+
+write_queue = Queue()
+cam_transports = {}
+
+
+async def writer_task():
+    while True:
+        cam_name, packet = await write_queue.get()
+        transport = cam_transports.get(cam_name)
+        if transport:
+            try:
+                transport.write(packet)
+            except Exception as e:
+                print(f"[ERROR] Write failed for {cam_name}: {e}")
+        else:
+            print(f"[WARN] No transport for {cam_name}")
+        write_queue.task_done()
+
+
+def enqueue_write(cam_name, packet):
+    write_queue.put_nowait((cam_name, packet))
 
 
 def get_config_path():
@@ -54,7 +76,6 @@ BAUDRATE = 2400
 
 current_target = "cam1"  # Default
 current_mode = "preview"  # Default
-cam_transports = {}
 
 
 class JoystickProtocol(asyncio.Protocol):
@@ -111,17 +132,13 @@ def make_preset_command(cam_address: int, cmd2: int, preset_id: int):
 
 
 def send_preset_command(cam_name, cmd2, preset_id):
-    transport = cam_transports.get(cam_name)
-    if not transport:
-        print(f"[WARN] No transport for {cam_name}")
-        return
-    packet = make_preset_command(
-        1, cmd2, preset_id
-    )  # Camera address is hardcoded as 1
+    # cam id is hardcoded, should be the same on all cameras or else they will
+    # not accept the preset commands
+    packet = make_preset_command(1, cmd2, preset_id)
     print(
-        f"[API] Sending preset cmd2={cmd2:02X} preset_id={preset_id} to {cam_name}"
+        f"[API] Queueing preset cmd2={cmd2:02X} preset_id={preset_id} for {cam_name}"
     )
-    transport.write(packet)
+    enqueue_write(cam_name, packet)
 
 
 async def handle_status(request):
@@ -197,7 +214,7 @@ async def handle_get_mode(request):
     return web.json_response({"mode": current_mode})
 
 
-def start_http_server():
+async def start_http_server():
     app = web.Application()
     app.router.add_get("/target/get", handle_status)
     app.router.add_post("/target/set", handle_set_target)
@@ -205,7 +222,11 @@ def start_http_server():
     app.router.add_post("/preset/save", handle_save_preset)
     app.router.add_get("/mode/get", handle_get_mode)
     app.router.add_post("/mode/set", handle_set_mode)
-    return web._run_app(app, port=1423)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 1423)
+    await site.start()
 
 
 async def main():
@@ -214,9 +235,8 @@ async def main():
     loop = asyncio.get_running_loop()
 
     def forward_packet(packet):
-        transport = cam_transports.get(current_target)
-        if transport:
-            transport.write(packet)
+        if current_target in cam_transports:
+            enqueue_write(current_target, packet)
         else:
             print(f"[WARN] No transport for {current_target}")
 
@@ -229,7 +249,8 @@ async def main():
     )
     cam_transports = {"cam1": cam1_transport, "cam2": cam2_transport}
 
-    # Connect to joystick
+    asyncio.create_task(writer_task())
+
     await serial_asyncio.create_serial_connection(
         loop,
         lambda: JoystickProtocol(forward_packet),
@@ -237,7 +258,6 @@ async def main():
         baudrate=BAUDRATE,
     )
 
-    # Start HTTP API in a separate task
     asyncio.create_task(start_http_server())
 
     # Wait forever
