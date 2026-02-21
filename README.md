@@ -4,9 +4,10 @@ For a typical livestream production environment consisting of 2 ptz cameras and 
 - expensive
 - offering no API
 - nearly impossible to automate
-- offering no rs485 serial connection support (basically only IP via RJ45)
 
-To fix this, I thought why not connect the ptz cameras via their rs485 to a rs485 <-> usb serial converter to a computer and use a server that selects which ptz camera is sent the current joystick input. It also has a http api that allows seleting the current camera target and ptz commands like save_preset or goto_preset.
+To fix this, I built a Python-based PTZ router that connects a traditional Pelco-D serial joystick to modern IP-based PTZ cameras. This server selects which camera receives the joystick input and provides a HTTP API for selecting the target camera and managing presets.
+
+The router receives Pelco-D packets from the joystick via a USB-to-RS485 converter and translates them into VISCA-over-IP commands, which are sent to the cameras over the network (UDP port 52381).
 
 See the following ascii diagram for the architecture.
 
@@ -26,8 +27,9 @@ See the following ascii diagram for the architecture.
                           |  Python asyncio PTZ Router   |
                           |------------------------------|
                           | - Parse Pelco-D packets      |
+                          | - Translate to VISCA commands|
                           | - current_target: cam1/cam2  |
-                          | - Forward to selected cam    |
+                          | - Forward to selected cam(IP)|
                           | - Handle HTTP API requests   |
                           |                              |
                           |   +----------------------+   |
@@ -43,16 +45,30 @@ See the following ascii diagram for the architecture.
                           +------------------------------+
                                          |
                     +--------------------+------------------+
-                    |                                       |
+                    | (Network / UDP)                       | (Network / UDP)
                     v                                       v
       +----------------------------+         +----------------------------+
-      |  /dev/ttyUSBY (CAM1_PORT)  |         |  /dev/ttyUSBZ (CAM2_PORT)  |
-      |  [async serial writer]     |         |  [async serial writer]     |
+      |  Camera 1 (192.168.1.3)    |         |  Camera 2 (192.168.1.4)    |
+      |  [VISCA over IP]           |         |  [VISCA over IP]           |
       +----------------------------+         +----------------------------+
-                    |                                        |
-                    v                                        v
-        +------------------------+              +------------------------+
-        |  PTZ Camera 1          |              |   PTZ Camera 2         |
-        |  (Pelco-D via RS-485)  |              |  (Pelco-D via RS-485)  |
-        +------------------------+              +------------------------+
+
+## Configuration
+
+The project uses a YAML configuration file located at `~/.config/diy_ptz_switch/config.yml`.
+
+Example configuration:
+
+```yaml
+location_roles:
+  "1-4.4": joystick
+  "1-4.1": cam1 # Optional if using IP
+  "1-4.2": cam2 # Optional if using IP
+
+cameras:
+  cam1: "192.168.1.3"
+  cam2: "192.168.1.4"
+```
+
+- `location_roles`: Maps USB port locations to roles (like `joystick`).
+- `cameras`: Maps camera names to their IP addresses for VISCA-over-IP communication.
 
