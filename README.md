@@ -133,8 +133,8 @@ Note that out of 4 RS-485 to USB Converters I bought, only 3 worked.
 Possible changes in future releases:
 
 - Add back the options to output the camera signals over RS-485 (currently fixed to IP/Ethernet/RJ45, but the git history contains working code from the RS-485 days)
-- Code Cleanup (don't look at all the pylint warnings)
-- API Doc (probably using OpenAPI/swagger)
+- Code Cleanup (especially the globals, don't look at all the pylint warnings)
+- API Doc (probably using OpenAPI/swagger by switching to fastapi/uvicorn)
 - more RESTful API (use `PUT` instead of `POST` requests)
 - less hardcoding of values (ports, baudrate, usb device name), they should be configurable via `config.yml`
 - add a testsuite
