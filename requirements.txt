@@ -2,3 +2,4 @@ pyyaml
 pyserial
 pyserial_asyncio
 aiohttp
+evdev
