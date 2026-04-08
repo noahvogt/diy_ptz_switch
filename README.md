@@ -80,7 +80,7 @@ cameras:
 - `location_roles`: Maps USB port locations to roles (like `joystick`). Required for `pelco_serial`.
 - `cameras`: Maps camera names to their IP addresses for VISCA-over-IP communication.
 
-## Easy selecting
+## Easy Testing
 
 You want to test the `switch.py` server, but you don't have two IP-enabled PTZ Cameras in your network? Just run two instances of `dummy_cam.py` like this:
 
