@@ -97,6 +97,22 @@ cameras:
   cam2: "127.0.0.2"
 ```
 
+When using `joystick_type: "usb_joystick"`, joystick buttons `1..8` set the live speed level:
+
+- `8` = full VISCA speed (current max/default)
+- `1` = 1/8 of max speed
+- `2..7` = proportional steps in between
+
+This speed level scales pan, tilt, and zoom speed while keeping direction handling unchanged.
+
+To inspect which physical buttons your joystick reports, run:
+
+```bash
+python3 test3djoystick.py
+```
+
+Then press buttons 1-8 and watch the printed key/button codes.
+
 ## Recommended Hardware
 
 There are basically two technologies to choose from when getting a joystick:

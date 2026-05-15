@@ -15,6 +15,9 @@ write_queue = Queue()
 cam_transports = {}
 
 VISCA_PORT = 52381
+MIN_SPEED_LEVEL = 1
+MAX_SPEED_LEVEL = 8
+DEFAULT_SPEED_LEVEL = 8
 
 
 class ViscaOverIP:
@@ -183,9 +186,64 @@ BAUDRATE = 2400
 
 CURRENT_TARGET = "cam1"  # Default
 CURRENT_MODE = "preview"  # Default
+CURRENT_SPEED_LEVEL = DEFAULT_SPEED_LEVEL  # Default
+
+
+def build_speed_button_map():
+    """
+    Build a map from evdev key codes to speed levels 1..8.
+    Supports common keyboard-like (KEY_1..KEY_8) and joystick button
+    families (BTN_1..BTN_8, BTN_TRIGGER_HAPPY1..8), plus
+    BTN_JOYSTICK buttons (BTN_TRIGGER..BTN_BASE2).
+    """
+    speed_button_map = {}
+    joystick_button_names = (
+        "BTN_TRIGGER",
+        "BTN_THUMB",
+        "BTN_THUMB2",
+        "BTN_TOP",
+        "BTN_TOP2",
+        "BTN_PINKIE",
+        "BTN_BASE",
+        "BTN_BASE2",
+    )
+
+    for speed_level in range(MIN_SPEED_LEVEL, MAX_SPEED_LEVEL + 1):
+        key_name = f"KEY_{speed_level}"
+        key_code = getattr(ecodes, key_name, None)
+        if key_code is not None:
+            speed_button_map[key_code] = speed_level
+
+        btn_name = f"BTN_{speed_level}"
+        btn_code = getattr(ecodes, btn_name, None)
+        if btn_code is not None:
+            speed_button_map[btn_code] = speed_level
+
+        happy_name = f"BTN_TRIGGER_HAPPY{speed_level}"
+        happy_code = getattr(ecodes, happy_name, None)
+        if happy_code is not None:
+            speed_button_map[happy_code] = speed_level
+
+        joy_code = getattr(ecodes, joystick_button_names[speed_level - 1], None)
+        if joy_code is not None:
+            speed_button_map[joy_code] = speed_level
+
+    return speed_button_map
+
+
+SPEED_BUTTON_MAP = build_speed_button_map()
+
+
+def scale_nonzero_speed(raw_speed, max_speed, speed_level):
+    if raw_speed <= 0:
+        return 0
+    scaled = int(raw_speed * speed_level / MAX_SPEED_LEVEL)
+    return max(1, min(max_speed, scaled))
 
 
 async def evdev_joystick_task(forward_func):
+    global CURRENT_SPEED_LEVEL
+
     devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
     target_device = None
     for device in devices:
@@ -198,6 +256,10 @@ async def evdev_joystick_task(forward_func):
         return
 
     print(f"[INFO] Using USB joystick: {target_device.name}")
+    print(
+        f"[INFO] USB speed level is {CURRENT_SPEED_LEVEL}/{MAX_SPEED_LEVEL} "
+        f"(press joystick buttons 1-8 to set it)"
+    )
 
     x_val = 512
     y_val = 512
@@ -216,29 +278,51 @@ async def evdev_joystick_task(forward_func):
                     y_val = event.value
                 elif event.code == ecodes.ABS_Z:
                     z_val = event.value
+            elif event.type == ecodes.EV_KEY:
+                # react on button-press only (ignore release / autorepeat)
+                if event.value == 1:
+                    speed_level = SPEED_BUTTON_MAP.get(event.code)
+                    if speed_level is not None:
+                        CURRENT_SPEED_LEVEL = speed_level
+                        print(
+                            f"[INFO] USB speed level set to "
+                            f"{CURRENT_SPEED_LEVEL}/{MAX_SPEED_LEVEL}"
+                        )
             elif event.type == ecodes.EV_SYN:
                 pan_dir = 0x03
-                pan_speed = 0x00
+                pan_speed_raw = 0x00
                 if x_val < 512 - deadzone:
                     pan_dir = 0x01  # Left
-                    pan_speed = int((512 - x_val) / 512.0 * 0x18)
+                    pan_speed_raw = int((512 - x_val) / 512.0 * 0x18)
                 elif x_val > 512 + deadzone:
                     pan_dir = 0x02  # Right
-                    pan_speed = int((x_val - 512) / 511.0 * 0x18)
+                    pan_speed_raw = int((x_val - 512) / 511.0 * 0x18)
                 pan_speed = (
-                    max(1, min(0x18, pan_speed)) if pan_dir != 0x03 else 0x00
+                    scale_nonzero_speed(
+                        max(1, min(0x18, pan_speed_raw)),
+                        0x18,
+                        CURRENT_SPEED_LEVEL,
+                    )
+                    if pan_dir != 0x03
+                    else 0x00
                 )
 
                 tilt_dir = 0x03
-                tilt_speed = 0x00
+                tilt_speed_raw = 0x00
                 if y_val < 512 - deadzone:
                     tilt_dir = 0x01  # Up
-                    tilt_speed = int((512 - y_val) / 512.0 * 0x17)
+                    tilt_speed_raw = int((512 - y_val) / 512.0 * 0x17)
                 elif y_val > 512 + deadzone:
                     tilt_dir = 0x02  # Down
-                    tilt_speed = int((y_val - 512) / 511.0 * 0x17)
+                    tilt_speed_raw = int((y_val - 512) / 511.0 * 0x17)
                 tilt_speed = (
-                    max(1, min(0x17, tilt_speed)) if tilt_dir != 0x03 else 0x00
+                    scale_nonzero_speed(
+                        max(1, min(0x17, tilt_speed_raw)),
+                        0x17,
+                        CURRENT_SPEED_LEVEL,
+                    )
+                    if tilt_dir != 0x03
+                    else 0x00
                 )
 
                 pt_packet = bytearray(
@@ -261,11 +345,15 @@ async def evdev_joystick_task(forward_func):
                 zoom_cmd = 0x00
                 if z_val < 512 - deadzone:
                     z_speed = int((512 - z_val) / 512.0 * 7)
-                    z_speed = max(0, min(7, z_speed))
+                    z_speed = scale_nonzero_speed(
+                        max(0, min(7, z_speed)), 7, CURRENT_SPEED_LEVEL
+                    )
                     zoom_cmd = 0x30 | z_speed
                 elif z_val > 512 + deadzone:
                     z_speed = int((z_val - 512) / 511.0 * 7)
-                    z_speed = max(0, min(7, z_speed))
+                    z_speed = scale_nonzero_speed(
+                        max(0, min(7, z_speed)), 7, CURRENT_SPEED_LEVEL
+                    )
                     zoom_cmd = 0x20 | z_speed
 
                 z_packet = bytearray([0x81, 0x01, 0x04, 0x07, zoom_cmd, 0xFF])
