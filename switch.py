@@ -5,6 +5,7 @@ from asyncio import Queue
 
 import yaml
 from aiohttp import web
+import aiohttp
 
 import serial_asyncio
 from serial.tools import list_ports
@@ -17,7 +18,8 @@ cam_transports = {}
 VISCA_PORT = 52381
 MIN_SPEED_LEVEL = 1
 MAX_SPEED_LEVEL = 8
-DEFAULT_SPEED_LEVEL = 8
+DEFAULT_SPEED_LEVEL = 3
+DEFAULT_USB_DEADZONE = 50
 
 
 class ViscaOverIP:
@@ -168,6 +170,43 @@ config = load_config()
 location_roles = config.get("location_roles", {})
 camera_ips = config.get("cameras", {})
 joystick_type = config.get("joystick_type", "pelco_serial")
+vulcan_speed_push = config.get("vulcan_speed_push", {})
+VULCAN_SPEED_PUSH_ENABLED = vulcan_speed_push.get("enabled", False)
+VULCAN_SPEED_PUSH_URL = vulcan_speed_push.get(
+    "set_state_url", "http://127.0.0.1:8080/set_state"
+)
+VULCAN_SPEED_PUSH_X = vulcan_speed_push.get("x", 4)
+VULCAN_SPEED_PUSH_Y = vulcan_speed_push.get("y", 8)
+VULCAN_SPEED_STATE_BASE_ID = vulcan_speed_push.get(
+    "speed_state_base_id", 1
+)
+
+
+def get_config_int(name, default, min_value, max_value):
+    raw_value = config.get(name, default)
+    if not isinstance(raw_value, int):
+        print(
+            f"[WARN] Invalid config '{name}'={raw_value!r}, "
+            + f"falling back to default {default}"
+        )
+        return default
+    if raw_value < min_value or raw_value > max_value:
+        print(
+            f"[WARN] Config '{name}'={raw_value} out of range "
+            + f"({min_value}..{max_value}), clamping"
+        )
+    return max(min_value, min(max_value, raw_value))
+
+
+USB_DEFAULT_SPEED_LEVEL = get_config_int(
+    "usb_default_speed_level",
+    DEFAULT_SPEED_LEVEL,
+    MIN_SPEED_LEVEL,
+    MAX_SPEED_LEVEL,
+)
+USB_DEADZONE = get_config_int(
+    "usb_deadzone", DEFAULT_USB_DEADZONE, 0, 511
+)
 
 port_map = {}
 for port in list_ports.comports():
@@ -186,7 +225,7 @@ BAUDRATE = 2400
 
 CURRENT_TARGET = "cam1"  # Default
 CURRENT_MODE = "preview"  # Default
-CURRENT_SPEED_LEVEL = DEFAULT_SPEED_LEVEL  # Default
+CURRENT_SPEED_LEVEL = USB_DEFAULT_SPEED_LEVEL  # Default
 
 
 def build_speed_button_map():
@@ -241,6 +280,36 @@ def scale_nonzero_speed(raw_speed, max_speed, speed_level):
     return max(1, min(max_speed, scaled))
 
 
+def get_vulcan_speed_state_id(speed_level):
+    return VULCAN_SPEED_STATE_BASE_ID + speed_level
+
+
+async def push_speed_level_update(speed_level):
+    if not VULCAN_SPEED_PUSH_ENABLED:
+        return
+
+    state_id = get_vulcan_speed_state_id(speed_level)
+    params = {
+        "x": VULCAN_SPEED_PUSH_X,
+        "y": VULCAN_SPEED_PUSH_Y,
+        "state": state_id,
+    }
+    timeout = aiohttp.ClientTimeout(total=1.5)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                VULCAN_SPEED_PUSH_URL, params=params
+            ) as response:
+                if response.status >= 400:
+                    body = await response.text()
+                    print(
+                        "[WARN] VulcanBoard speed push failed: "
+                        + f"HTTP {response.status}, body={body}"
+                    )
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        print(f"[WARN] VulcanBoard speed push failed: {exc}")
+
+
 async def evdev_joystick_task(forward_func):
     global CURRENT_SPEED_LEVEL
 
@@ -264,7 +333,7 @@ async def evdev_joystick_task(forward_func):
     x_val = 512
     y_val = 512
     z_val = 512
-    deadzone = 50
+    deadzone = USB_DEADZONE
 
     last_pt_packet = None
     last_z_packet = None
@@ -282,11 +351,17 @@ async def evdev_joystick_task(forward_func):
                 # react on button-press only (ignore release / autorepeat)
                 if event.value == 1:
                     speed_level = SPEED_BUTTON_MAP.get(event.code)
-                    if speed_level is not None:
+                    if (
+                        speed_level is not None
+                        and speed_level != CURRENT_SPEED_LEVEL
+                    ):
                         CURRENT_SPEED_LEVEL = speed_level
                         print(
                             f"[INFO] USB speed level set to "
                             f"{CURRENT_SPEED_LEVEL}/{MAX_SPEED_LEVEL}"
+                        )
+                        asyncio.create_task(
+                            push_speed_level_update(CURRENT_SPEED_LEVEL)
                         )
             elif event.type == ecodes.EV_SYN:
                 pan_dir = 0x03
@@ -540,6 +615,15 @@ async def handle_get_mode(request):
     return web.json_response({"mode": CURRENT_MODE})
 
 
+async def handle_get_speed(request):
+    return web.json_response(
+        {
+            "speed_level": CURRENT_SPEED_LEVEL,
+            "max_speed_level": MAX_SPEED_LEVEL,
+        }
+    )
+
+
 async def start_http_server():
     app = web.Application()
     app.router.add_get("/target/get", handle_status)
@@ -548,6 +632,7 @@ async def start_http_server():
     app.router.add_post("/preset/save", handle_save_preset)
     app.router.add_get("/mode/get", handle_get_mode)
     app.router.add_post("/mode/set", handle_set_mode)
+    app.router.add_get("/speed/get", handle_get_speed)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -578,6 +663,9 @@ async def main():
         print("[WARN] No cameras configured")
 
     asyncio.create_task(writer_task())
+
+    if VULCAN_SPEED_PUSH_ENABLED:
+        asyncio.create_task(push_speed_level_update(CURRENT_SPEED_LEVEL))
 
     if joystick_type == "usb_joystick":
         print("[INFO] Starting USB joystick task")

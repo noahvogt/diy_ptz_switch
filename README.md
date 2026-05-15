@@ -63,6 +63,8 @@ Example configuration:
 
 ```yaml
 joystick_type: "usb_joystick" # "usb_joystick" or "pelco_serial" (default)
+usb_default_speed_level: 3 # 1..8, startup speed level for usb_joystick
+usb_deadzone: 10 # 0..511, center deadzone for usb_joystick axes
 
 location_roles:
   "1-4.4": joystick
@@ -72,13 +74,27 @@ location_roles:
 cameras:
   cam1: "192.168.1.3"
   cam2: "192.168.1.4"
+
+vulcan_speed_push:
+  enabled: true
+  set_state_url: "http://127.0.0.1:8080/set_state"
+  x: 4
+  y: 8
+  speed_state_base_id: 1
 ```
 
 - `joystick_type`: Sets the input method.
   - `pelco_serial` (default): Uses a traditional Pelco-D serial joystick via a USB-to-RS485 converter.
   - `usb_joystick`: Uses a modern USB 3D PTZ joystick (HID device) using the `evdev` library.
+- `usb_default_speed_level` (optional): Startup speed level in USB joystick mode (`1..8`).
+- `usb_deadzone` (optional): Axis deadzone in USB joystick mode (`0..511`).
 - `location_roles`: Maps USB port locations to roles (like `joystick`). Required for `pelco_serial`.
 - `cameras`: Maps camera names to their IP addresses for VISCA-over-IP communication.
+- `vulcan_speed_push` (optional): Pushes current speed level to a VulcanBoard button state via `/set_state` whenever speed changes.
+  - `enabled`: Enables/disables push updates.
+  - `set_state_url`: VulcanBoard API endpoint.
+  - `x` / `y`: Button position in VulcanBoard.
+  - `speed_state_base_id`: State id base. Effective state is `base + speed_level` (so base `1` maps speed `1..8` to state `2..9`).
 
 ## Easy Testing
 
@@ -99,11 +115,26 @@ cameras:
 
 When using `joystick_type: "usb_joystick"`, joystick buttons `1..8` set the live speed level:
 
-- `8` = full VISCA speed (current max/default)
+- `8` = full VISCA speed (max)
 - `1` = 1/8 of max speed
 - `2..7` = proportional steps in between
+- Startup default is configurable via `usb_default_speed_level` (default `3`)
 
 This speed level scales pan, tilt, and zoom speed while keeping direction handling unchanged.
+
+Current speed can be fetched via HTTP:
+
+```bash
+curl -s http://localhost:1423/speed/get
+```
+
+Example response:
+
+```json
+{"speed_level": 6, "max_speed_level": 8}
+```
+
+If `vulcan_speed_push.enabled` is `true`, button presses `1..8` also push the new speed state to VulcanBoard immediately (no polling loop needed).
 
 To inspect which physical buttons your joystick reports, run:
 
